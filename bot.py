@@ -1,9 +1,13 @@
 import os
 from flask import Flask, request
+from flask_cors import CORS
 import telegram
 
+# Khởi tạo Flask app và bật CORS
 app = Flask(__name__)
+CORS(app)
 
+# Lấy token và kênh Telegram từ biến môi trường
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
@@ -17,8 +21,9 @@ def home():
 def notify():
     try:
         data = request.json
-        print("📥 Nhận dữ liệu từ web:", data)  # Log ra để kiểm tra request đến
+        print("📥 Nhận dữ liệu từ web:", data)
 
+        # Đọc từng trường từ JSON
         coin = data.get("coin")
         target_price = data.get("targetPrice")
         unlock_time = data.get("unlockTime")
@@ -26,6 +31,7 @@ def notify():
         amount = data.get("amountToPay")
         current_price = data.get("currentPrice")
 
+        # Tạo thông điệp gửi về Telegram
         message = (
             f"🔐 Coin: {coin}\n"
             f"💰 Giá kỳ vọng: {target_price}\n"
