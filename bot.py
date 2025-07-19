@@ -108,5 +108,6 @@ async def monitor_payment(order_id, amount):
     except Exception as e:
         print(f"❌ Lỗi monitor_payment cho {order_id}: {e}")
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)
+# Không dùng app.run() vì dùng gunicorn ở production
+# if __name__ == '__main__':
+#     app.run(host='0.0.0.0', port=PORT)
