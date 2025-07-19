@@ -6,6 +6,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import telegram
 from bscscan import BscScan  # Cài bằng pip install bscscan-python
+import logging  # Thêm logging để debug
+
+# Thiết lập logging
+logging.basicConfig(level=logging.INFO)
 
 # Khởi tạo Flask app và bật CORS
 app = Flask(__name__)
@@ -16,7 +20,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 BSC_API_KEY = os.getenv("BSC_API_KEY")
 USDT_WALLET = os.getenv("USDT_WALLET")
-PORT = int(os.getenv("PORT", 8443))  # Default 8443 nếu không set
+PORT = int(os.getenv("PORT"))  # Không default, Railway cung cấp $PORT
 
 bot = telegram.Bot(token=BOT_TOKEN)
 
@@ -34,7 +38,7 @@ def home():
 def notify():
     try:
         data = request.json
-        print("📥 Nhận dữ liệu từ web:", data)
+        logging.info("📥 Nhận dữ liệu từ web: %s", data)
 
         # Đọc từng trường từ JSON
         coin = data.get("coin")
@@ -69,7 +73,7 @@ def notify():
 
         return jsonify({'status': 'ok', 'order_id': order_id})  # Trả order_id cho web
     except Exception as e:
-        print("❌ Lỗi /notify:", e)
+        logging.error("❌ Lỗi /notify: %s", e)
         return f"❌ Lỗi: {e}", 500
 
 # Endpoint để web poll status
@@ -106,7 +110,7 @@ async def monitor_payment(order_id, amount):
                         return  # Dừng poll
                 await asyncio.sleep(60)  # Check mỗi 1 phút
     except Exception as e:
-        print(f"❌ Lỗi monitor_payment cho {order_id}: {e}")
+        logging.error("❌ Lỗi monitor_payment cho %s: %s", order_id, e)
 
 # Không dùng app.run() vì dùng gunicorn ở production
 # if __name__ == '__main__':
