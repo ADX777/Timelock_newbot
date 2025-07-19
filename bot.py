@@ -20,7 +20,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 BSC_API_KEY = os.getenv("BSC_API_KEY")
 USDT_WALLET = os.getenv("USDT_WALLET")
-PORT = int(os.getenv("PORT"))  # Không default, Railway cung cấp $PORT
+PORT = int(os.getenv("PORT"))  # Railway cung cấp $PORT
 
 bot = telegram.Bot(token=BOT_TOKEN)
 
@@ -29,6 +29,10 @@ conn = sqlite3.connect('orders.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('CREATE TABLE IF NOT EXISTS orders (order_id TEXT PRIMARY KEY, status TEXT, amount REAL)')
 conn.commit()
+
+# Event loop cho async tasks
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 @app.route('/')
 def home():
@@ -63,7 +67,7 @@ def notify():
         )
 
         bot.send_message(chat_id=CHANNEL_ID, text=message)
-        asyncio.create_task(monitor_payment(order_id, amount))
+        loop.create_task(monitor_payment(order_id, amount))  # Chạy task trong loop riêng
 
         return jsonify({'status': 'ok', 'order_id': order_id})
     except Exception as e:
