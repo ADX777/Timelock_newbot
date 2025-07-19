@@ -2,3 +2,4 @@ flask
 flask-cors
 python-telegram-bot
 bscscan-python
+gunicorn
