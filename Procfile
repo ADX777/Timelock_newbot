@@ -1,1 +1,1 @@
-web: gunicorn -b 0.0.0.0:$PORT --workers 2 --timeout 0 --graceful-timeout 30 bot:app
+web: gunicorn -b 0.0.0.0:$PORT --worker-class gevent --timeout 0 --workers 1 bot:app
