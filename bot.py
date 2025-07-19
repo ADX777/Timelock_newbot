@@ -22,6 +22,10 @@ BSC_API_KEY = os.getenv("BSC_API_KEY")
 USDT_WALLET = os.getenv("USDT_WALLET")
 PORT = int(os.getenv("PORT"))  # Không default, Railway cung cấp $PORT
 
+# Kiểm tra env vars
+if not BOT_TOKEN or not CHANNEL_ID or not BSC_API_KEY or not USDT_WALLET:
+    raise ValueError("Missing environment variables!")
+
 bot = telegram.Bot(token=BOT_TOKEN)
 
 # DB SQLite để lưu status đơn hàng
@@ -36,6 +40,10 @@ loop = asyncio.get_event_loop()
 @app.route('/')
 def home():
     return '✅ Bot is running!'
+
+@app.route('/health')
+def health():
+    return 'OK', 200
 
 @app.route('/notify', methods=['POST'])
 def notify():
