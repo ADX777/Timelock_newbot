@@ -1,1 +1,1 @@
-web: uvicorn bot:app --host 0.0.0.0 --port $PORT
+web: gunicorn -b 0.0.0.0:$PORT --workers 1 --timeout 0 bot:app
