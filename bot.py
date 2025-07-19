@@ -7,6 +7,7 @@ from flask_cors import CORS
 import telegram
 from bscscan import BscScan  # Cài bằng pip install bscscan-python
 import logging
+import signal
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,15 @@ conn.commit()
 # Event loop cho async tasks
 loop = asyncio.get_event_loop()
 
+# Handler cho SIGTERM
+def shutdown_handler(signum, frame):
+    logging.info("Received SIGTERM, shutting down gracefully")
+    loop.stop()  # Stop async loop
+    conn.close()  # Close DB
+    exit(0)
+
+signal.signal(signal.SIGTERM, shutdown_handler)
+
 @app.route('/')
 def home():
     return '✅ Bot is running!'
@@ -51,7 +61,6 @@ def notify():
         data = request.json
         logging.info("📥 Nhận dữ liệu từ web: %s", data)
 
-        # Đọc từng trường từ JSON
         coin = data.get("coin")
         target_price = data.get("targetPrice")
         unlock_time = data.get("unlockTime")
@@ -59,14 +68,11 @@ def notify():
         amount = data.get("amountToPay")
         current_price = data.get("currentPrice")
 
-        # Tạo order_id nếu web chưa gửi
-        order_id = data.get("orderId") or str(uuid.uuid4())[:8]  # Random short ID
+        order_id = data.get("orderId") or str(uuid.uuid4())[:8]
 
-        # Lưu status pending vào DB
         cursor.execute('INSERT OR REPLACE INTO orders (order_id, status, amount) VALUES (?, "pending", ?)', (order_id, amount))
         conn.commit()
 
-        # Tạo thông điệp gửi về Telegram (cảnh báo)
         message = (
             f"🔐 Đơn mới ID: {order_id}\n"
             f"🌟 Coin: {coin}\n"
@@ -79,15 +85,13 @@ def notify():
 
         bot.send_message(chat_id=CHANNEL_ID, text=message)
 
-        # Bắt đầu poll check payment async
         loop.create_task(monitor_payment(order_id, amount))
 
-        return jsonify({'status': 'ok', 'order_id': order_id})  # Trả order_id cho web
+        return jsonify({'status': 'ok', 'order_id': order_id})
     except Exception as e:
         logging.error("❌ Lỗi /notify: %s", e)
         return f"❌ Lỗi: {e}", 500
 
-# Endpoint để web poll status
 @app.route('/check-status', methods=['GET'])
 def check_status():
     order_id = request.args.get('order_id')
@@ -99,7 +103,6 @@ def check_status():
         return jsonify({'status': result[0]})
     return jsonify({'status': 'not_found'}), 404
 
-# Hàm async poll check payment USDT trên BSC
 async def monitor_payment(order_id, amount):
     try:
         logging.info("Bắt đầu monitor_payment cho đơn %s", order_id)
@@ -107,19 +110,17 @@ async def monitor_payment(order_id, amount):
             while True:
                 transfers = await bsc.get_bep20_token_transfer_events_by_address(
                     address=USDT_WALLET,
-                    contract_address='0x55d398326f99059fF775485246999027B3197955',  # USDT contract BSC
+                    contract_address='0x55d398326f99059fF775485246999027B3197955',
                     sort='desc'
                 )
-                for tx in transfers[:10]:  # Chỉ check gần nhất để nhanh
-                    tx_amount = float(tx['value']) / 10**18  # USDT có 18 decimals
+                for tx in transfers[:10]:
+                    tx_amount = float(tx['value']) / 10**18
                     if tx_amount >= amount:
-                        # Update status paid
                         cursor.execute('UPDATE orders SET status="paid" WHERE order_id=?', (order_id,))
                         conn.commit()
-                        # Gửi xác nhận Telegram cho admin
                         bot.send_message(chat_id=CHANNEL_ID, text=f"✅ Đơn {order_id} đã thanh toán! Tx hash: {tx['hash']}\nSố tiền: {tx_amount} USDT")
-                        return  # Dừng poll
-                await asyncio.sleep(60)  # Check mỗi 1 phút
+                        return
+                await asyncio.sleep(60)
     except Exception as e:
         logging.error("❌ Lỗi monitor_payment cho %s: %s", order_id, e)
 
