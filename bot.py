@@ -1,11 +1,11 @@
 import os
-import uuid
+import uuid  # Để tạo order_id random nếu cần
 import sqlite3
 import asyncio
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import telegram
-from bscscan import BscScan
+from bscscan import BscScan  # Cài bằng pip install bscscan-python
 import logging
 
 # Thiết lập logging
@@ -20,7 +20,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 BSC_API_KEY = os.getenv("BSC_API_KEY")
 USDT_WALLET = os.getenv("USDT_WALLET")
-PORT = int(os.getenv("PORT"))  # Railway cung cấp $PORT
+PORT = int(os.getenv("PORT"))  # Không default, Railway cung cấp $PORT
 
 bot = telegram.Bot(token=BOT_TOKEN)
 
@@ -35,7 +35,6 @@ loop = asyncio.get_event_loop()
 
 @app.route('/')
 def home():
-    logging.info("Home endpoint called")
     return '✅ Bot is running!'
 
 @app.route('/notify', methods=['POST'])
@@ -44,6 +43,7 @@ def notify():
         data = request.json
         logging.info("📥 Nhận dữ liệu từ web: %s", data)
 
+        # Đọc từng trường từ JSON
         coin = data.get("coin")
         target_price = data.get("targetPrice")
         unlock_time = data.get("unlockTime")
@@ -51,11 +51,14 @@ def notify():
         amount = data.get("amountToPay")
         current_price = data.get("currentPrice")
 
-        order_id = data.get("orderId") or str(uuid.uuid4())[:8]
+        # Tạo order_id nếu web chưa gửi
+        order_id = data.get("orderId") or str(uuid.uuid4())[:8]  # Random short ID
 
+        # Lưu status pending vào DB
         cursor.execute('INSERT OR REPLACE INTO orders (order_id, status, amount) VALUES (?, "pending", ?)', (order_id, amount))
         conn.commit()
 
+        # Tạo thông điệp gửi về Telegram (cảnh báo)
         message = (
             f"🔐 Đơn mới ID: {order_id}\n"
             f"🌟 Coin: {coin}\n"
@@ -68,13 +71,15 @@ def notify():
 
         bot.send_message(chat_id=CHANNEL_ID, text=message)
 
+        # Bắt đầu poll check payment async
         loop.create_task(monitor_payment(order_id, amount))
 
-        return jsonify({'status': 'ok', 'order_id': order_id})
+        return jsonify({'status': 'ok', 'order_id': order_id})  # Trả order_id cho web
     except Exception as e:
         logging.error("❌ Lỗi /notify: %s", e)
         return f"❌ Lỗi: {e}", 500
 
+# Endpoint để web poll status
 @app.route('/check-status', methods=['GET'])
 def check_status():
     order_id = request.args.get('order_id')
@@ -86,6 +91,7 @@ def check_status():
         return jsonify({'status': result[0]})
     return jsonify({'status': 'not_found'}), 404
 
+# Hàm async poll check payment USDT trên BSC
 async def monitor_payment(order_id, amount):
     try:
         logging.info("Bắt đầu monitor_payment cho đơn %s", order_id)
@@ -93,20 +99,22 @@ async def monitor_payment(order_id, amount):
             while True:
                 transfers = await bsc.get_bep20_token_transfer_events_by_address(
                     address=USDT_WALLET,
-                    contract_address='0x55d398326f99059fF775485246999027B3197955',
+                    contract_address='0x55d398326f99059fF775485246999027B3197955',  # USDT contract BSC
                     sort='desc'
                 )
-                for tx in transfers[:10]:
-                    tx_amount = float(tx['value']) / 10**18
+                for tx in transfers[:10]:  # Chỉ check gần nhất để nhanh
+                    tx_amount = float(tx['value']) / 10**18  # USDT có 18 decimals
                     if tx_amount >= amount:
+                        # Update status paid
                         cursor.execute('UPDATE orders SET status="paid" WHERE order_id=?', (order_id,))
                         conn.commit()
+                        # Gửi xác nhận Telegram cho admin
                         bot.send_message(chat_id=CHANNEL_ID, text=f"✅ Đơn {order_id} đã thanh toán! Tx hash: {tx['hash']}\nSố tiền: {tx_amount} USDT")
-                        return
-                await asyncio.sleep(60)
+                        return  # Dừng poll
+                await asyncio.sleep(60)  # Check mỗi 1 phút
     except Exception as e:
         logging.error("❌ Lỗi monitor_payment cho %s: %s", order_id, e)
 
-# Không dùng app.run() vì dùng uvicorn/gunicorn ở production
+# Không dùng app.run() vì dùng gunicorn ở production
 # if __name__ == '__main__':
 #     app.run(host='0.0.0.0', port=PORT)
