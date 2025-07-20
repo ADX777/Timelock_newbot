@@ -5,3 +5,4 @@ bscscan-python
 gunicorn
 gevent
 greenlet
+uvicorn
