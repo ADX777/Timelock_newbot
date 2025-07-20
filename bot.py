@@ -10,6 +10,7 @@ import logging
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
+logging.info("Bot module loaded, starting...")
 
 # Khởi tạo Flask app và bật CORS
 app = Flask(__name__)
@@ -72,14 +73,13 @@ def notify():
         bot.send_message(chat_id=CHANNEL_ID, text=message)
 
         # Bắt đầu poll check payment async
-        asyncio.create_task(monitor_payment(order_id, amount))
+        loop.create_task(monitor_payment(order_id, amount))
 
         return jsonify({'status': 'ok', 'order_id': order_id})  # Trả order_id cho web
     except Exception as e:
         logging.error("❌ Lỗi /notify: %s", e)
         return f"❌ Lỗi: {e}", 500
 
-# Endpoint để web poll status
 @app.route('/check-status', methods=['GET'])
 def check_status():
     order_id = request.args.get('order_id')
