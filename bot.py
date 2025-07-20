@@ -10,7 +10,6 @@ import logging
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
-logging.info("Bot module loaded, starting...")
 
 # Khởi tạo Flask app và bật CORS
 app = Flask(__name__)
