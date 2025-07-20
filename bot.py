@@ -71,8 +71,8 @@ def notify():
 
         bot.send_message(chat_id=CHANNEL_ID, text=message)
 
-        # Tạm comment phần thanh toán để test notify trước
-        # loop.create_task(monitor_payment(order_id, amount))
+        # Bắt đầu poll check payment async
+        asyncio.create_task(monitor_payment(order_id, amount))
 
         return jsonify({'status': 'ok', 'order_id': order_id})  # Trả order_id cho web
     except Exception as e:
@@ -91,29 +91,29 @@ def check_status():
         return jsonify({'status': result[0]})
     return jsonify({'status': 'not_found'}), 404
 
-# Hàm async poll check payment USDT trên BSC (tạm comment để làm sau)
-# async def monitor_payment(order_id, amount):
-#     try:
-#         logging.info("Bắt đầu monitor_payment cho đơn %s", order_id)
-#         async with BscScan(BSC_API_KEY) as bsc:
-#             while True:
-#                 transfers = await bsc.get_bep20_token_transfer_events_by_address(
-#                     address=USDT_WALLET,
-#                     contract_address='0x55d398326f99059fF775485246999027B3197955',  # USDT contract BSC
-#                     sort='desc'
-#                 )
-#                 for tx in transfers[:10]:  # Chỉ check gần nhất để nhanh
-#                     tx_amount = float(tx['value']) / 10**18  # USDT có 18 decimals
-#                     if tx_amount >= amount:
-#                         # Update status paid
-#                         cursor.execute('UPDATE orders SET status="paid" WHERE order_id=?', (order_id,))
-#                         conn.commit()
-#                         # Gửi xác nhận Telegram cho admin
-#                         bot.send_message(chat_id=CHANNEL_ID, text=f"✅ Đơn {order_id} đã thanh toán! Tx hash: {tx['hash']}\nSố tiền: {tx_amount} USDT")
-#                         return  # Dừng poll
-#                 await asyncio.sleep(60)  # Check mỗi 1 phút
-#     except Exception as e:
-#         logging.error("❌ Lỗi monitor_payment cho %s: %s", order_id, e)
+# Hàm async poll check payment USDT trên BSC
+async def monitor_payment(order_id, amount):
+    try:
+        logging.info("Bắt đầu monitor_payment cho đơn %s", order_id)
+        async with BscScan(BSC_API_KEY) as bsc:
+            while True:
+                transfers = await bsc.get_bep20_token_transfer_events_by_address(
+                    address=USDT_WALLET,
+                    contract_address='0x55d398326f99059fF775485246999027B3197955',  # USDT contract BSC
+                    sort='desc'
+                )
+                for tx in transfers[:10]:  # Chỉ check gần nhất để nhanh
+                    tx_amount = float(tx['value']) / 10**18  # USDT có 18 decimals
+                    if tx_amount >= amount:
+                        # Update status paid
+                        cursor.execute('UPDATE orders SET status="paid" WHERE order_id=?', (order_id,))
+                        conn.commit()
+                        # Gửi xác nhận Telegram cho admin
+                        bot.send_message(chat_id=CHANNEL_ID, text=f"✅ Đơn {order_id} đã thanh toán! Tx hash: {tx['hash']}\nSố tiền: {tx_amount} USDT")
+                        return  # Dừng poll
+                await asyncio.sleep(60)  # Check mỗi 1 phút
+    except Exception as e:
+        logging.error("❌ Lỗi monitor_payment cho %s: %s", order_id, e)
 
 # Không dùng app.run() vì dùng gunicorn ở production
 # if __name__ == '__main__':
