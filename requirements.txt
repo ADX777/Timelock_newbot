@@ -3,4 +3,4 @@ flask-cors
 python-telegram-bot
 bscscan-python
 gunicorn
-gevent
+gevent==23.9.1
