@@ -3,4 +3,3 @@ flask-cors
 python-telegram-bot
 bscscan-python
 gunicorn
-greenlet
