@@ -2,5 +2,7 @@ flask
 flask-cors
 python-telegram-bot
 bscscan-python
+retry
 gunicorn
 gevent==23.9.1
+moralis  # Thêm để sau tích hợp Moralis
