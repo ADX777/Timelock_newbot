@@ -1,8 +1,8 @@
 flask
 flask-cors
 python-telegram-bot==20.6
+bscscan-python==1.0.2  # Giữ để monitor nếu cần fallback
 retry
 gunicorn
 gevent==23.9.1
-moralis==0.2.14  # Hoặc phiên bản mới nhất từ pip
-requests  # Thêm để gọi NowPayments API
+requests  # Thêm cho NowPayments và Tatum API
