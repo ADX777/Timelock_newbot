@@ -2,15 +2,15 @@ import os
 import uuid
 import sqlite3
 import asyncio
-import logging
-import hmac
-import hashlib
-import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import telegram
+from bscscan import BscScan
 from retry import retry
-from moralis import evm_api, sol_api  # Sử dụng Moralis cho Solana/IPFS
+import logging
+import hmac
+import hashlib
+import requests  # Thêm để gọi NowPayments và Tatum
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
@@ -21,10 +21,11 @@ CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "YOUR_FRONTEND
 # Env vars
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-MORALIS_API_KEY = os.getenv("MORALIS_API_KEY")  # Đăng ký tại moralis.io
+BSC_API_KEY = os.getenv("BSC_API_KEY")
+USDT_WALLET = os.getenv("USDT_WALLET")
+TATUM_API_KEY = os.getenv("TATUM_API_KEY")
 NOWPAYMENTS_API_KEY = os.getenv("NOWPAYMENTS_API_KEY")
 NOWPAYMENTS_IPN_SECRET = os.getenv("NOWPAYMENTS_IPN_SECRET")
-USDT_WALLET = os.getenv("USDT_WALLET")  # Ví Solana nhận USDT
 PORT = int(os.getenv("PORT", 5000))
 
 bot = telegram.Bot(token=BOT_TOKEN)
@@ -42,7 +43,7 @@ loop = asyncio.get_event_loop()
 def home():
     return '✅ Bot is running!'
 
-@app.route('/create-invoice', methods=['POST'])  # Bước 1 & 2: Tạo invoice USDT Solana và QR
+@app.route('/create-invoice', methods=['POST'])  # Bước 1 & 2: Tạo invoice USDT-BSC và QR
 def create_invoice():
     try:
         data = request.json
@@ -53,17 +54,15 @@ def create_invoice():
         unlock_time = data.get("unlockTime")
         order_id = str(uuid.uuid4())[:8]
 
-        # Mã hóa note (fake AES, thay bằng thực từ frontend)
+        # Mã hóa tạm thời (thay bằng AES từ frontend)
         encrypted_payload = f"ENC[{note}|{coin}|{target_price}|{unlock_time}]"
 
-        # Tạo invoice NowPayments cho USDT trên Solana
-        import requests
+        # Tạo invoice NowPayments cho USDT trên BSC
         headers = {"x-api-key": NOWPAYMENTS_API_KEY, "Content-Type": "application/json"}
         payload = {
             "price_amount": amount,
             "price_currency": "usdt",
-            "pay_currency": "usdt",  # USDT trên Solana (USDT-SPL)
-            "pay_chain": "solana",  # Chỉ định mạng Solana
+            "pay_currency": "usdtbsc",  # USDT trên BSC
             "order_id": order_id,
             "order_description": "Timelock Encryption",
             "ipn_callback_url": "https://timelocknewbot-production.up.railway.app/webhook"
@@ -72,19 +71,22 @@ def create_invoice():
         response.raise_for_status()
         invoice_data = response.json()
 
-        # Lưu order vào DB
+        # Lưu vào DB
         cursor.execute('INSERT INTO orders (order_id, status, amount, note, coin, target_price, unlock_time, encrypted_payload) VALUES (?, "pending", ?, ?, ?, ?, ?, ?)',
                        (order_id, amount, note, coin, target_price, unlock_time, encrypted_payload))
         conn.commit()
 
         # Notify Telegram
-        message = f"🔐 Đơn mới ID: {order_id}\n🌟 Coin: {coin}\n💰 Giá: {target_price}\n⏰ Mở khóa: {unlock_time}\n💵 Thanh toán: {amount} USDT Solana"
+        message = f"🔐 Đơn mới ID: {order_id}\n🌟 Coin: {coin}\n💰 Giá: {target_price}\n⏰ Mở khóa: {unlock_time}\n💵 Thanh toán: {amount} USDT-BSC"
         bot.send_message(chat_id=CHANNEL_ID, text=message)
+
+        # Start monitor fallback (nếu webhook fail)
+        loop.create_task(monitor_payment(order_id, amount))
 
         return jsonify({
             "status": "ok",
             "order_id": order_id,
-            "qrCode": f"{invoice_data['invoice_url']}?qr=1",  # QR từ NowPayments
+            "qrCode": f"{invoice_data['invoice_url']}?qr=1",
             "invoiceUrl": invoice_data["invoice_url"]
         })
     except Exception as e:
@@ -111,30 +113,25 @@ def webhook():
 
             amount, note, coin, target_price, unlock_time, encrypted_payload = order
 
-            # Ghi lên IPFS qua Moralis
-            ipfs_params = {
-                "path": f"timelock_{order_id}.json",
-                "content": base64.b64encode(encrypted_payload.encode()).decode()
-            }
-            ipfs_result = evm_api.ipfs.upload_folder(api_key=MORALIS_API_KEY, params=ipfs_params)
-            ipfs_hash = ipfs_result[0]["path"]
+            # Ghi lên IPFS qua Tatum
+            ipfs_headers = {"x-api-key": TATUM_API_KEY, "Content-Type": "multipart/form-data"}
+            ipfs_form = {'file': ( 'timelock.json', encrypted_payload.encode()) }
+            ipfs_response = requests.post("https://api.tatum.io/v3/ipfs", files=ipfs_form, headers=ipfs_headers)
+            ipfs_response.raise_for_status()
+            ipfs_hash = ipfs_response.json()["ipfsHash"]
 
-            # Ghi tx lên Solana qua Moralis (transfer với data)
-            tx_params = {
-                "network": "mainnet",  # Hoặc "devnet" để test
-                "sender_address": USDT_WALLET,  # Ví Solana của bạn
-                "receiver_address": USDT_WALLET,  # Self-transfer để ghi data
-                "transaction_type": "transfer",
-                "asset": {
-                    "token": {
-                        "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT trên Solana
-                        "amount": "0"
-                    }
-                },
-                "memo": ipfs_hash  # Ghi hash vào memo
+            # Ghi tx lên BSC qua Tatum
+            tx_headers = {"x-api-key": TATUM_API_KEY, "Content-Type": "application/json"}
+            tx_payload = {
+                "chain": "bsc",
+                "fromPrivateKey": "YOUR_BSC_WALLET_PRIVATE_KEY",  # Thêm env var mới nếu cần
+                "to": USDT_WALLET,  # Self-transfer
+                "value": "0",
+                "data": ipfs_hash.encode().hex()  # Ghi hash vào data
             }
-            tx_result = sol_api.wallet.transfer(api_key=MORALIS_API_KEY, params=tx_params)
-            tx_hash = tx_result["transaction_hash"]
+            tx_response = requests.post("https://api.tatum.io/v3/blockchain/transaction", json=tx_payload, headers=tx_headers)
+            tx_response.raise_for_status()
+            tx_hash = tx_response.json()["txId"]
 
             # Cập nhật DB
             cursor.execute('UPDATE orders SET status="paid", tx_hash=?, ipfs_hash=? WHERE order_id=?', (tx_hash, ipfs_hash, order_id))
@@ -160,10 +157,17 @@ def check_status():
         return jsonify({
             'status': status,
             'encrypted_payload': encrypted_payload,
-            'tx_hash': tx_hash,
-            'ipfs_hash': ipfs_hash
+            'tx_hash': tx_hash or '',
+            'ipfs_hash': ipfs_hash or ''
         })
     return jsonify({'status': 'not_found'}), 404
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)
+@retry(tries=3, delay=2)
+async def monitor_payment(order_id, amount):  # Fallback monitor BSC
+    try:
+        async with BscScan(BSC_API_KEY) as bsc:
+            while True:
+                transfers = await bsc.get_bep20_token_transfer_events_by_address(
+                    address=USDT_WALLET,
+                    contract_address='0x55d398326f99059fF775485246999027B3197955',
+                    sort='
