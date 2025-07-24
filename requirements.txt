@@ -1,8 +1,8 @@
 flask
 flask-cors
-python-telegram-bot
-bscscan-python
+python-telegram-bot==20.6
 retry
 gunicorn
 gevent==23.9.1
-moralis  # Thêm để sau tích hợp Moralis
+moralis==0.2.14  # Hoặc phiên bản mới nhất từ pip
+requests  # Thêm để gọi NowPayments API
